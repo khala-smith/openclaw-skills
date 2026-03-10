@@ -66,6 +66,15 @@ async function fetchNextTodoIssue(projectName) {
                     createdAt
                     state { name }
                     team { states { nodes { id name type } } }
+                    project {
+                        name
+                        externalLinks {
+                            nodes {
+                                title
+                                url
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -219,32 +228,113 @@ async function main() {
         await updateLinearState(issueData.id, inProgressState.id);
     }
 
-    // --- B. 准备 Git Worktree 环境 ---
+    // --- B. 获取 Repo 与 OpenClaw Workspace，并准备项目目录 ---
+    let repoUrl = null;
+    if (issueData.project && issueData.project.externalLinks && issueData.project.externalLinks.nodes) {
+        const repoLink = issueData.project.externalLinks.nodes.find(l => l.title.toLowerCase().includes('repo'));
+        if (repoLink) repoUrl = repoLink.url;
+    }
+
+    if (!repoUrl) {
+        logError(`无法在 Project [${projectName}] 的 External Links 中找到标题包含 "Repo" 的链接，无法自动拉取代码。`);
+        process.exit(1);
+    }
+
+    logInfo(`找到项目 Repo: ${repoUrl}`);
+
+    // 解析 Repo Name (例如从 https://github.com/khala-smith/openclaw-skills 提取 openclaw-skills)
+    // 去掉结尾的 .git 和最后的斜杠
+    const cleanRepoUrl = repoUrl.replace(/\.git$/, '').replace(/\/$/, '');
+    const repoName = cleanRepoUrl.substring(cleanRepoUrl.lastIndexOf('/') + 1);
+
+    // 解析 ~/.openclaw/openclaw.json 获取 workspace
+    const os = require('os');
+    const openclawConfigFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    let workspaceDir = path.join(os.homedir(), '.openclaw', 'workspace'); // default fallback
+
+    if (existsSync(openclawConfigFile)) {
+        try {
+            const configContent = readFileSync(openclawConfigFile, 'utf8');
+            const configData = JSON.parse(configContent);
+            if (configData?.agents?.defaults?.workspace) {
+                // 如果是 "~/" 开头，则替换为 homedir
+                let configuredWorkspace = configData.agents.defaults.workspace;
+                if (configuredWorkspace.startsWith('~/')) {
+                    configuredWorkspace = path.join(os.homedir(), configuredWorkspace.slice(2));
+                }
+                workspaceDir = configuredWorkspace;
+            }
+        } catch (e) {
+            logError('读取 ~/.openclaw/openclaw.json 失败，使用默认 workspace。', e.message);
+        }
+    }
+
+    logInfo(`使用 OpenClaw Workspace: ${workspaceDir}`);
+
+    const codexProjectsDir = path.join(workspaceDir, 'codex-dev-projects');
+    if (!existsSync(codexProjectsDir)) {
+        logInfo(`创建 codex-dev-projects 目录...`);
+        execSync(`mkdir -p "${codexProjectsDir}"`);
+    }
+
+    const targetRepoDir = path.join(codexProjectsDir, repoName);
+
+    if (!existsSync(targetRepoDir)) {
+        logInfo(`[Git] 目标目录不存在，开始 Clone 仓库...`);
+        try {
+            execSync(`git clone ${repoUrl} "${targetRepoDir}"`, { stdio: isDebug ? 'inherit' : 'ignore' });
+        } catch (e) {
+            logError('Git Clone 失败。', e.message); process.exit(1);
+        }
+    } else {
+        logInfo(`[Git] 目录已存在，开始拉取最新代码 (Pull)...`);
+        try {
+            // 确保在主分支并且拉取最新
+            execSync(`git fetch origin`, { cwd: targetRepoDir, stdio: 'ignore' });
+
+            // 尝试找出默认主分支名 (main 或 master)
+            let defaultBranch = 'main';
+            const branches = execSync(`git branch -r`, { cwd: targetRepoDir }).toString();
+            if (branches.includes('origin/master') && !branches.includes('origin/main')) {
+                defaultBranch = 'master';
+            }
+
+            // 如果已经在工作树或者有未提交的更改可能会受影响，为了安全起见假设当前 repo 目录是干净的主干
+            execSync(`git checkout ${defaultBranch}`, { cwd: targetRepoDir, stdio: 'ignore' });
+            execSync(`git pull origin ${defaultBranch}`, { cwd: targetRepoDir, stdio: isDebug ? 'inherit' : 'ignore' });
+        } catch (e) {
+            logError('Git Pull 失败，请确保本地 codex-dev-projects 下的仓库没有未提交冲突。', e.message); process.exit(1);
+        }
+    }
+
+    // --- C. 准备 Git Worktree 环境 ---
+    // 之后的所有的操作都要基于 targetRepoDir!
     const safeTitle = issueData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const branchName = `feat/${issueData.identifier}-${safeTitle}`;
-    const worktreePath = path.resolve(PROJECT_ROOT, '..', `${issueData.identifier}-worktree`);
+    // Worktree 创建在 targetRepoDir 同级，加上 -worktree 后缀，避免污染 repo 本身
+    const worktreePath = path.resolve(targetRepoDir, '..', `${issueData.identifier}-worktree`);
 
-    logInfo(`配置隔离开发环境...`);
+    logInfo(`配置隔离开发环境 (Worktree)...`);
     if (existsSync(worktreePath)) {
-        try { execSync(`git worktree remove -f ${worktreePath}`, { stdio: 'ignore' }); }
-        catch (e) { execSync(`rm -rf ${worktreePath}`, { stdio: 'ignore' }); }
+        try { execSync(`git worktree remove -f "${worktreePath}"`, { cwd: targetRepoDir, stdio: 'ignore' }); }
+        catch (e) { execSync(`rm -rf "${worktreePath}"`, { stdio: 'ignore' }); }
     }
 
     let baseBranch = 'origin/main';
     try {
         execSync(`git fetch origin`, { stdio: 'ignore' });
-        const remoteBranches = execSync(`git branch -r`).toString();
+        const remoteBranches = execSync(`git branch -r`, { cwd: targetRepoDir }).toString();
         if (remoteBranches.includes('origin/master') && !remoteBranches.includes('origin/main')) {
             baseBranch = 'origin/master';
         }
     } catch (e) { baseBranch = 'HEAD'; }
 
     let branchExists = false;
-    try { execSync(`git rev-parse --verify ${branchName}`, { stdio: 'ignore' }); branchExists = true; } catch (e) { }
+    try { execSync(`git rev-parse --verify ${branchName}`, { cwd: targetRepoDir, stdio: 'ignore' }); branchExists = true; } catch (e) { }
 
     try {
-        if (branchExists) execSync(`git worktree add ${worktreePath} ${branchName}`, { stdio: isDebug ? 'inherit' : 'ignore' });
-        else execSync(`git worktree add ${worktreePath} -b ${branchName} ${baseBranch}`, { stdio: isDebug ? 'inherit' : 'ignore' });
+        if (branchExists) execSync(`git worktree add "${worktreePath}" ${branchName}`, { cwd: targetRepoDir, stdio: isDebug ? 'inherit' : 'ignore' });
+        else execSync(`git worktree add "${worktreePath}" -b ${branchName} ${baseBranch}`, { cwd: targetRepoDir, stdio: isDebug ? 'inherit' : 'ignore' });
 
         if (existsSync(path.join(worktreePath, 'package.json'))) {
             logInfo(`📦 安装隔离区依赖...`);
