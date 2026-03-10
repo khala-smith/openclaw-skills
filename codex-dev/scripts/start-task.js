@@ -70,7 +70,7 @@ async function fetchNextTodoIssue(projectName) {
                         name
                         externalLinks {
                             nodes {
-                                title
+                                label
                                 url
                             }
                         }
@@ -231,7 +231,7 @@ async function main() {
     // --- B. 获取 Repo 与 OpenClaw Workspace，并准备项目目录 ---
     let repoUrl = null;
     if (issueData.project && issueData.project.externalLinks && issueData.project.externalLinks.nodes) {
-        const repoLink = issueData.project.externalLinks.nodes.find(l => l.title.toLowerCase().includes('repo'));
+        const repoLink = issueData.project.externalLinks.nodes.find(l => l.label && l.label.toLowerCase().includes('repo'));
         if (repoLink) repoUrl = repoLink.url;
     }
 
