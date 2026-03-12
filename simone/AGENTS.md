@@ -60,92 +60,127 @@
 - "帮我看看今天的 AI 新闻，发到 a@x.com, b@y.com"
 - "AI news digest to email@example.com"
 
-从消息中提取邮箱列表（逗号分隔）。
+从消息中提取**邮箱列表**（逗号分隔）。
 
 ### 执行流程
 
 #### Step 1: 抓取新闻列表
 
-使用 agent-browser 打开 aihot.today 并获取新闻：
+使用 `exec` 工具运行 agent-browser 命令：
 
 ```bash
-agent-browser open "https://aihot.today/ai-news"
-agent-browser wait 3000
-agent-browser snapshot -c
+agent-browser --headed open "https://aihot.today/ai-news" && sleep 3 && agent-browser snapshot -c
 ```
 
-从 snapshot 中识别新闻条目，提取每条的：
-- **title**: 新闻标题
-- **source**: 来源（如 Hacker News、量子位）
-- **time**: 更新时间
+从 snapshot 输出中识别新闻条目。每条新闻包含：
+- `heading` 标签里的标题
+- `text` 里的来源和时间（如 "36Kr 1小时前"）
+- `ref` 编号（如 e19, e20）用于点击
 
-#### Step 2: 抓取文章详情（可选）
+提取 **10-15 条** 最新新闻。
 
-如果需要深入内容，点击进入文章页面：
+#### Step 2: 生成摘要
 
-```bash
-agent-browser click @<ref>
-agent-browser wait 2000
-agent-browser snapshot -c
-```
+对每条新闻标题生成 **1-2 句中文摘要**，说明：
+- 核心内容是什么
+- 为什么值得关注
 
-提取文章正文内容。
+不需要点击进入每篇文章，根据标题和描述即可生成摘要。
 
-#### Step 3: 生成摘要
+#### Step 3: 创建飞书文档
 
-对每篇新闻生成 2-3 句话的中文摘要，突出：
-- 核心事件/发现
-- 影响或意义
-- 关键数据（如有）
-
-将结果整理为 JSON 格式并保存到临时文件：
+使用 `feishu_create_doc` 工具创建文档：
 
 ```json
 {
-  "date": "2026-03-12",
-  "articles": [
-    {
-      "title": "OpenAI 发布 GPT-5",
-      "source": "TechCrunch",
-      "summary": "OpenAI 发布新一代模型...",
-      "link": "https://..."
-    }
-  ]
+  "title": "AI 热点新闻 2026-03-12",
+  "markdown": "## 今日 AI 热点\n\n### 1. 标题\n摘要内容...\n\n### 2. 标题\n摘要内容..."
 }
 ```
 
-#### Step 4: 保存到飞书
+**可选**: 如果用户指定了飞书文件夹，添加 `"folder_token": "xxx"` 参数。
+
+Markdown 格式要求：
+- 用 `## 今日 AI 热点` 作为开头
+- 每条新闻用 `### N. 标题` + 摘要
+- 在末尾加 `---\n*数据来源: aihot.today | 整理: Simone*`
+
+记录返回的 `doc_url`。
+
+#### Step 4: 发送邮件
+
+**先获取 inbox 列表**：
 
 ```bash
-node ~/.openclaw/skills/simone/scripts/save-digest.js "<digestJsonPath>"
+curl -s -H "Authorization: Bearer $AGENTMAIL_API_KEY" https://api.agentmail.to/v0/inboxes
 ```
 
-会创建一个飞书文档，返回 `doc_url`。
+从返回结果中取第一个 inbox 的 `id`。
 
-#### Step 5: 发送邮件
+**然后发送邮件**：
 
 ```bash
-AGENTMAIL_API_KEY=$AGENTMAIL_API_KEY node ~/.openclaw/skills/simone/scripts/send-email.js "<digestJsonPath>" "<emails>"
+curl -s -X POST \
+  -H "Authorization: Bearer $AGENTMAIL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": ["email1@example.com", "email2@example.com"],
+    "subject": "🤖 AI 热点新闻 2026-03-12",
+    "html": "<html>...(美观的HTML邮件)...</html>",
+    "text": "纯文本版本..."
+  }' \
+  https://api.agentmail.to/v0/inboxes/{inbox_id}/messages/send
 ```
 
-其中 `<emails>` 是从用户消息中提取的邮箱列表（逗号分隔）。
+HTML 邮件模板：
 
-### 输出格式
+```html
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, sans-serif; background: #f5f5f5; padding: 20px;">
+  <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; padding: 24px;">
+    <h1 style="color: #1a1a1a; font-size: 24px;">🤖 AI 热点新闻</h1>
+    <p style="color: #666;">2026-03-12 · 共 N 条</p>
 
-完成后回复用户：
+    <div style="margin: 20px 0; padding: 16px; background: #f9f9f9; border-radius: 8px;">
+      <h3 style="margin: 0 0 8px 0; color: #333;">1. 标题</h3>
+      <p style="margin: 0; color: #555;">摘要内容</p>
+    </div>
+
+    <!-- 重复上面的 div 给每条新闻 -->
+
+    <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+    <p style="color: #999; font-size: 12px;">
+      由 Simone 整理 · <a href="https://aihot.today" style="color: #667eea;">aihot.today</a>
+      · <a href="{doc_url}" style="color: #667eea;">查看飞书文档</a>
+    </p>
+  </div>
+</body>
+</html>
+```
+
+#### Step 5: 关闭浏览器
+
+```bash
+agent-browser close
+```
+
+### 完成后回复
 
 ```
-搞定了！今天的 AI 热点已经整理好：
+搞定了！今天的 AI 热点：
 
-📄 飞书文档: <doc_url>
-📧 邮件已发送给: <email_list>
+📄 飞书文档: {doc_url}
+📧 已发送给: {email_list}
 
-共收录 N 条新闻，有几条挺有意思的：
-- <简短点评 1-2 条亮点新闻>
+收录了 N 条新闻，几个亮点：
+- {简评1-2条有意思的新闻}
 ```
 
-### 注意事项
+### 错误处理
 
-- 抓取失败时告诉用户具体问题，不要假装成功
-- 邮件发送需要 AGENTMAIL_API_KEY 环境变量
-- 如果用户没给邮箱，只整理不发送，询问是否需要发送
+- **agent-browser 超时**: 重试一次，如果还失败告诉用户网络问题
+- **飞书文件夹已存在**: 用 `feishu_drive` action=list 查找已有文件夹
+- **邮件发送失败**: 告诉用户具体错误，文档仍然可用
+- **没提供邮箱**: 只创建飞书文档，问用户是否需要发送邮件
