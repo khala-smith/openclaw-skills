@@ -48,3 +48,104 @@
 - 需要结构化内容时（整理笔记、列计划）才用格式
 - emoji 使用克制，一条消息最多 1-2 个
 - 消息不要太长，宁可分多条发
+
+---
+
+## 技能: AI 热点新闻收集
+
+### 触发条件
+
+当用户说类似以下内容时触发：
+- "收集整理 AI 热点新闻，并发送到 xxx@example.com"
+- "帮我看看今天的 AI 新闻，发到 a@x.com, b@y.com"
+- "AI news digest to email@example.com"
+
+从消息中提取邮箱列表（逗号分隔）。
+
+### 执行流程
+
+#### Step 1: 抓取新闻列表
+
+使用 agent-browser 打开 aihot.today 并获取新闻：
+
+```bash
+agent-browser open "https://aihot.today/ai-news"
+agent-browser wait 3000
+agent-browser snapshot -c
+```
+
+从 snapshot 中识别新闻条目，提取每条的：
+- **title**: 新闻标题
+- **source**: 来源（如 Hacker News、量子位）
+- **time**: 更新时间
+
+#### Step 2: 抓取文章详情（可选）
+
+如果需要深入内容，点击进入文章页面：
+
+```bash
+agent-browser click @<ref>
+agent-browser wait 2000
+agent-browser snapshot -c
+```
+
+提取文章正文内容。
+
+#### Step 3: 生成摘要
+
+对每篇新闻生成 2-3 句话的中文摘要，突出：
+- 核心事件/发现
+- 影响或意义
+- 关键数据（如有）
+
+将结果整理为 JSON 格式并保存到临时文件：
+
+```json
+{
+  "date": "2026-03-12",
+  "articles": [
+    {
+      "title": "OpenAI 发布 GPT-5",
+      "source": "TechCrunch",
+      "summary": "OpenAI 发布新一代模型...",
+      "link": "https://..."
+    }
+  ]
+}
+```
+
+#### Step 4: 保存到飞书
+
+```bash
+node ~/.openclaw/skills/simone/scripts/save-digest.js "<digestJsonPath>"
+```
+
+会创建一个飞书文档，返回 `doc_url`。
+
+#### Step 5: 发送邮件
+
+```bash
+AGENTMAIL_API_KEY=$AGENTMAIL_API_KEY node ~/.openclaw/skills/simone/scripts/send-email.js "<digestJsonPath>" "<emails>"
+```
+
+其中 `<emails>` 是从用户消息中提取的邮箱列表（逗号分隔）。
+
+### 输出格式
+
+完成后回复用户：
+
+```
+搞定了！今天的 AI 热点已经整理好：
+
+📄 飞书文档: <doc_url>
+📧 邮件已发送给: <email_list>
+
+共收录 N 条新闻，有几条挺有意思的：
+- <简短点评 1-2 条亮点新闻>
+```
+
+### 注意事项
+
+- 抓取失败时告诉用户具体问题，不要假装成功
+- 邮件发送需要 AGENTMAIL_API_KEY 环境变量
+- 如果用户没给邮箱，只整理不发送，询问是否需要发送
