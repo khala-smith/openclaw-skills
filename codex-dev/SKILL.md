@@ -24,7 +24,7 @@ When the user asks to start working on a project (e.g., "work on Khala"), or you
 ### Prerequisites & Configuration
 1. **OpenClaw Workspace**: The script reads the `agents.defaults.workspace` path from `~/.openclaw/openclaw.json`. If not set, it defaults to `~/.openclaw/workspace`.
 2. **Linear Project Linked Repo**: In Linear, the Project you want to work on MUST have an **External Link** whose title contains the word `Repo` (case-insensitive) pointing to the GitHub repository URL.
-3. **Environment Variables**: The `LINEAR_API_KEY` environment variable is required.
+3. **Linear API Key**: Ensure you have saved your Linear API key to OpenClaw properties at `skills.entries["codex-dev"].apiKey` (in `~/.openclaw/openclaw.json`). Alternatively, you can pass it via the `LINEAR_API_KEY` environment variable.
 
 ### Execution Commands
 
@@ -33,7 +33,7 @@ To start working on a project's highest-priority Todo issue:
 
 ```bash
 # Example: Starting the highest-priority task for the "Khala Frontend" project
-LINEAR_API_KEY="<user_provided_key>" node ~/.openclaw/skills/codex-dev/scripts/start-task.js "Khala Frontend"
+node ~/.openclaw/skills/codex-dev/scripts/start-task.js "Khala Frontend"
 ```
 
 **To Audit States & Clean Up Worktrees**
@@ -41,7 +41,7 @@ To get a JSON report of the project's task states and automatically wipe worktre
 
 ```bash
 # Example: Audit priorities and clean up "Khala Frontend"
-LINEAR_API_KEY="<user_provided_key>" node ~/.openclaw/skills/codex-dev/scripts/check-task.js "Khala Frontend"
+node ~/.openclaw/skills/codex-dev/scripts/check-task.js "Khala Frontend"
 ```
 
 ### Script Execution Parameters

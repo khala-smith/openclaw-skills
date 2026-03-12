@@ -9,7 +9,7 @@ import { checkCodexUsage } from './check-usage.js';
 // -----------------------------------------------------------------
 // 环境与全局配置
 // -----------------------------------------------------------------
-const LINEAR_API_KEY = process.env.LINEAR_API_KEY;
+let LINEAR_API_KEY = process.env.LINEAR_API_KEY;
 const isDebug = process.env.DEBUG === 'true';
 
 const PROJECT_ROOT = path.resolve(process.cwd());
@@ -21,6 +21,30 @@ const RUNNERS_DIR = path.join(OPENCLAW_DIR, 'runners');
 
 // 获取当前脚本的绝对路径，用于 Bash 回调
 const __filename = fileURLToPath(import.meta.url);
+
+const openclawConfigFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+let workspaceDir = path.join(os.homedir(), '.openclaw', 'workspace'); // default fallback
+
+if (existsSync(openclawConfigFile)) {
+    try {
+        const configContent = readFileSync(openclawConfigFile, 'utf8');
+        const configData = JSON.parse(configContent);
+        if (configData?.agents?.defaults?.workspace) {
+            let configuredWorkspace = configData.agents.defaults.workspace;
+            if (configuredWorkspace.startsWith('~/')) {
+                configuredWorkspace = path.join(os.homedir(), configuredWorkspace.slice(2));
+            }
+            workspaceDir = configuredWorkspace;
+        }
+        if (configData?.skills?.entries?.['codex-dev']?.apiKey) {
+            LINEAR_API_KEY = configData.skills.entries['codex-dev'].apiKey;
+        }
+    } catch (e) {
+        console.error('[ERROR] ⚠️ 读取 ~/.openclaw/openclaw.json 失败。', e.message);
+    }
+}
+
+// globals
 
 function logInfo(msg) { console.log(`[INFO] ${msg}`); }
 function logError(msg, err = '') { console.error(`[ERROR] ❌ ${msg}`, err); }
@@ -256,26 +280,8 @@ async function main() {
     const cleanRepoUrl = repoUrl.replace(/\.git$/, '').replace(/\/$/, '');
     const repoName = cleanRepoUrl.substring(cleanRepoUrl.lastIndexOf('/') + 1);
 
-    // 解析 ~/.openclaw/openclaw.json 获取 workspace
-    const openclawConfigFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-    let workspaceDir = path.join(os.homedir(), '.openclaw', 'workspace'); // default fallback
-
-    if (existsSync(openclawConfigFile)) {
-        try {
-            const configContent = readFileSync(openclawConfigFile, 'utf8');
-            const configData = JSON.parse(configContent);
-            if (configData?.agents?.defaults?.workspace) {
-                // 如果是 "~/" 开头，则替换为 homedir
-                let configuredWorkspace = configData.agents.defaults.workspace;
-                if (configuredWorkspace.startsWith('~/')) {
-                    configuredWorkspace = path.join(os.homedir(), configuredWorkspace.slice(2));
-                }
-                workspaceDir = configuredWorkspace;
-            }
-        } catch (e) {
-            logError('读取 ~/.openclaw/openclaw.json 失败，使用默认 workspace。', e.message);
-        }
-    }
+    // Workspace 已在全局环境加载
+    logInfo(`使用 OpenClaw Workspace: ${workspaceDir}`);
 
     logInfo(`使用 OpenClaw Workspace: ${workspaceDir}`);
 

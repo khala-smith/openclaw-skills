@@ -6,8 +6,30 @@ import os from 'os';
 // -----------------------------------------------------------------
 // 环境与全局配置
 // -----------------------------------------------------------------
-const LINEAR_API_KEY = process.env.LINEAR_API_KEY;
+let LINEAR_API_KEY = process.env.LINEAR_API_KEY;
 const isDebug = process.env.DEBUG === 'true';
+
+const openclawConfigFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+let workspaceDir = path.join(os.homedir(), '.openclaw', 'workspace'); // default fallback
+
+if (existsSync(openclawConfigFile)) {
+    try {
+        const configContent = readFileSync(openclawConfigFile, 'utf8');
+        const configData = JSON.parse(configContent);
+        if (configData?.agents?.defaults?.workspace) {
+            let configuredWorkspace = configData.agents.defaults.workspace;
+            if (configuredWorkspace.startsWith('~/')) {
+                configuredWorkspace = path.join(os.homedir(), configuredWorkspace.slice(2));
+            }
+            workspaceDir = configuredWorkspace;
+        }
+        if (configData?.skills?.entries?.['codex-dev']?.apiKey) {
+            LINEAR_API_KEY = configData.skills.entries['codex-dev'].apiKey;
+        }
+    } catch (e) {
+        // ignore
+    }
+}
 
 function logInfo(msg) { console.log(`[INFO] ${msg}`); }
 function logError(msg, err = '') { console.error(`[ERROR] ❌ ${msg}`, err); }
@@ -116,25 +138,7 @@ async function main() {
     const cleanRepoUrl = repoUrl.replace(/\.git$/, '').replace(/\/$/, '');
     const repoName = cleanRepoUrl.substring(cleanRepoUrl.lastIndexOf('/') + 1);
 
-    // 解析 ~/.openclaw/openclaw.json 获取 workspace
-    const openclawConfigFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-    let workspaceDir = path.join(os.homedir(), '.openclaw', 'workspace');
-
-    if (existsSync(openclawConfigFile)) {
-        try {
-            const configContent = readFileSync(openclawConfigFile, 'utf8');
-            const configData = JSON.parse(configContent);
-            if (configData?.agents?.defaults?.workspace) {
-                let configuredWorkspace = configData.agents.defaults.workspace;
-                if (configuredWorkspace.startsWith('~/')) {
-                    configuredWorkspace = path.join(os.homedir(), configuredWorkspace.slice(2));
-                }
-                workspaceDir = configuredWorkspace;
-            }
-        } catch (e) {
-            // ignore
-        }
-    }
+    // Workspace 已在全局环境加载
 
     const targetRepoDir = path.join(workspaceDir, 'codex-dev-projects', repoName);
     if (!existsSync(targetRepoDir)) {
